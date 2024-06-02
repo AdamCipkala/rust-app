@@ -1,9 +1,29 @@
-extern crate flate2;
+use actix_web::{web, App, HttpResponse, HttpServer, Responder};
+use serde::Deserialize;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use std::fs::File;
-use std::io::{self, Read};
-use flate2::read::GzDecoder;
+use std::io::{self};
+
+#[derive(Deserialize)]
+struct FileOperation {
+    input_path: String,
+    output_path: String,
+}
+
+async fn compress_file_endpoint(data: web::Json<FileOperation>) -> impl Responder {
+    match compress_file(&data.input_path, &data.output_path) {
+        Ok(_) => HttpResponse::Ok().body("File compressed successfully."),
+        Err(e) => HttpResponse::InternalServerError().body(format!("Error compressing file: {}", e)),
+    }
+}
+
+async fn decompress_file_endpoint(data: web::Json<FileOperation>) -> impl Responder {
+    match decompress_file(&data.input_path, &data.output_path) {
+        Ok(_) => HttpResponse::Ok().body("File decompressed successfully."),
+        Err(e) => HttpResponse::InternalServerError().body(format!("Error decompressing file: {}", e)),
+    }
+}
 
 fn compress_file(input_path: &str, output_path: &str) -> io::Result<()> {
     let input_file = File::open(input_path)?;
@@ -18,25 +38,20 @@ fn compress_file(input_path: &str, output_path: &str) -> io::Result<()> {
 fn decompress_file(input_path: &str, output_path: &str) -> io::Result<()> {
     let input_file = File::open(input_path)?;
     let output_file = File::create(output_path)?;
-    let mut decoder = GzDecoder::new(input_file);
+    let mut decoder = flate2::read::GzDecoder::new(input_file);
     
     io::copy(&mut decoder, &mut &output_file)?;
     Ok(())
 }
 
-
-fn main() {
-    let input_path = "example.txt";
-    let compressed_path = "example.txt.gz";
-    let decompressed_path = "example_decompressed.txt";
-    
-    match compress_file(input_path, compressed_path) {
-        Ok(_) => println!("File compressed successfully."),
-        Err(e) => eprintln!("Error compressing file: {}", e),
-    }
-    
-    match decompress_file(compressed_path, decompressed_path) {
-        Ok(_) => println!("File decompressed successfully."),
-        Err(e) => eprintln!("Error decompressing file: {}", e),
-    }
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    HttpServer::new(|| {
+        App::new()
+            .route("/compress", web::post().to(compress_file_endpoint))
+            .route("/decompress", web::post().to(decompress_file_endpoint))
+    })
+    .bind("127.0.0.1:8080")?
+    .run()
+    .await
 }
