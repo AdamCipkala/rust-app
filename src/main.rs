@@ -1,47 +1,46 @@
-use actix_web::{web, App, HttpResponse, HttpServer, Responder};
-use serde::Deserialize;
+
+use actix_web::{web, App, HttpResponse, HttpServer, Result};
+use actix_multipart::Multipart;
+use futures_util::TryStreamExt as _;
 use flate2::write::GzEncoder;
+use flate2::read::GzDecoder;
 use flate2::Compression;
-use std::fs::File;
-use std::io::{self};
+use std::io::{Write, Read};
 
-#[derive(Deserialize)]
-struct FileOperation {
-    input_path: String,
-    output_path: String,
-}
+async fn compress_file_endpoint(mut payload: Multipart) -> Result<HttpResponse> {
+    let mut buffer = Vec::new();
 
-async fn compress_file_endpoint(data: web::Json<FileOperation>) -> impl Responder {
-    match compress_file(&data.input_path, &data.output_path) {
-        Ok(_) => HttpResponse::Ok().body("File compressed successfully."),
-        Err(e) => HttpResponse::InternalServerError().body(format!("Error compressing file: {}", e)),
+    while let Ok(Some(mut field)) = payload.try_next().await {
+        while let Ok(Some(chunk)) = field.try_next().await {
+            buffer.extend_from_slice(&chunk);
+        }
     }
+
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(&buffer)?;
+    let compressed_data = encoder.finish()?;
+
+    Ok(HttpResponse::Ok()
+        .insert_header(("Content-Type", "application/gzip"))
+        .body(compressed_data))
 }
 
-async fn decompress_file_endpoint(data: web::Json<FileOperation>) -> impl Responder {
-    match decompress_file(&data.input_path, &data.output_path) {
-        Ok(_) => HttpResponse::Ok().body("File decompressed successfully."),
-        Err(e) => HttpResponse::InternalServerError().body(format!("Error decompressing file: {}", e)),
+async fn decompress_file_endpoint(mut payload: Multipart) -> Result<HttpResponse> {
+    let mut buffer = Vec::new();
+
+    while let Ok(Some(mut field)) = payload.try_next().await {
+        while let Ok(Some(chunk)) = field.try_next().await {
+            buffer.extend_from_slice(&chunk);
+        }
     }
-}
 
-fn compress_file(input_path: &str, output_path: &str) -> io::Result<()> {
-    let input_file = File::open(input_path)?;
-    let output_file = File::create(output_path)?;
-    let mut encoder = GzEncoder::new(output_file, Compression::default());
-    
-    io::copy(&mut &input_file, &mut encoder)?;
-    encoder.finish()?;
-    Ok(())
-}
+    let mut decoder = GzDecoder::new(&buffer[..]);
+    let mut decompressed_data = Vec::new();
+    decoder.read_to_end(&mut decompressed_data)?;
 
-fn decompress_file(input_path: &str, output_path: &str) -> io::Result<()> {
-    let input_file = File::open(input_path)?;
-    let output_file = File::create(output_path)?;
-    let mut decoder = flate2::read::GzDecoder::new(input_file);
-    
-    io::copy(&mut decoder, &mut &output_file)?;
-    Ok(())
+    Ok(HttpResponse::Ok()
+        .insert_header(("Content-Type", "application/octet-stream"))
+        .body(decompressed_data))
 }
 
 #[actix_web::main]
