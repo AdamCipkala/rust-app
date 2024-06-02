@@ -9,4 +9,5 @@ actix-web = "4.6.0"
 ferris-says = "0.3.1"
 flate2 = "1.0.30"
 futures-util = "0.3.30"
+image = "0.25.1"
 serde = { version = "1.0.203", features = ["derive"] }
